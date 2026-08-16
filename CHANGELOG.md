@@ -2,6 +2,17 @@
 
 All notable user-visible changes to EnhancedDisplays are documented here.
 
+## 0.1.1 — 2026-08-16
+
+- Added `showShortcutAlerts` to enable or disable EnhancedDisplays shortcut popups.
+- Added `shortcutAlertDuration` to control popup duration without changing Hammerspoon's global hotkey alert duration.
+- Added `moveLayoutMode = "mapped"` (default) so windows can translate their last EnhancedDisplays layout to the corresponding layout on the destination display.
+- Added `relative` and `absolute` cross-display move modes.
+- Kept `preserveAbsoluteSize = true` as a backwards-compatible per-action alias for absolute-size moves.
+- Added `shortcutStatus()` for diagnosing macOS-reserved or otherwise unavailable shortcuts.
+- Improved failed-hotkey binding diagnostics.
+- Fixed a duplicate local layout-resolution line in `applyLayout()`.
+
 ## 0.1.0 — 2026-08-16
 
 Initial public release.

@@ -14,6 +14,13 @@ EnhancedDisplays:start({
     -- Optional gap around the positioned window, in points.
     gap = 0,
 
+    -- Optional on-screen shortcut feedback.
+    showShortcutAlerts = false,
+    shortcutAlertDuration = 0.6,
+
+    -- Translate the last layout to the destination display when possible.
+    moveLayoutMode = "mapped",
+
     shortcuts = {
         -- Same shortcut, different layout depending on current display.
         ["⌘2"] = {

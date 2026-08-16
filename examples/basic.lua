@@ -4,6 +4,9 @@
 local EnhancedDisplays = hs.loadSpoon("EnhancedDisplays")
 
 EnhancedDisplays:start({
+    showShortcutAlerts = false,
+    moveLayoutMode = "mapped",
+
     displays = {
         laptop  = { name = "Built-in" },
         monitor = { name = "Studio Display" },

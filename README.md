@@ -11,7 +11,7 @@ It is conceptually inspired by [EnhancedSpaces](https://github.com/franzbu/Enhan
 
 EnhancedDisplays does not create virtual desktops, hide windows to simulate spaces, or replace macOS Spaces. It works with the displays macOS and Hammerspoon actually see.
 
-**Current version: 0.1.0**
+**Current version: 0.1.1**
 
 ---
 
@@ -52,15 +52,17 @@ The shortcut stays the same. EnhancedDisplays checks which physical display cont
 
 ## Features
 
-EnhancedDisplays 0.1.0 includes:
+EnhancedDisplays 0.1.1 includes:
 
 - display-aware global keyboard shortcuts;
+- optional per-shortcut on-screen feedback with configurable duration;
 - the same shortcut doing different things on different displays;
 - easy shortcut notation using either macOS symbols or words;
 - built-in halves, thirds, two-thirds, quarters, and full-screen layouts;
 - arbitrary custom layouts using screen-relative coordinates;
 - a Moom-style grid helper for 2×2, 3×3, 6×6, or any other grid;
 - moving the focused window to the next or previous physical display;
+- mapped cross-display moves that automatically convert a remembered layout to the corresponding destination-display layout;
 - moving a window directly to a named display;
 - optionally applying a layout immediately after moving to another display;
 - friendly display aliases such as `laptop`, `studio`, `left`, or `projector`;
@@ -82,7 +84,7 @@ You need:
 2. [Hammerspoon](https://www.hammerspoon.org/);
 3. Accessibility permission for Hammerspoon in **System Settings → Privacy & Security → Accessibility**.
 
-EnhancedDisplays is written for current Hammerspoon APIs. The initial development target is **macOS 26.5 with Hammerspoon 1.1.1**; version 0.1.0 has not yet been broadly validated across older macOS/Hammerspoon combinations.
+EnhancedDisplays is written for current Hammerspoon APIs. The initial development target is **macOS 26.5 with Hammerspoon 1.1.1**; version 0.1.1 has not yet been broadly validated across older macOS/Hammerspoon combinations.
 
 If a macOS or Hammerspoon update changes window-management behavior, please open an issue with your macOS version, Hammerspoon version, display arrangement, and a minimal configuration that reproduces the problem.
 
@@ -149,6 +151,14 @@ EnhancedDisplays:start({
         laptop  = { name = "Built-in" },
         monitor = { name = "Studio Display" },
     },
+
+    -- Shortcut popups are off by default.
+    showShortcutAlerts = false,
+    shortcutAlertDuration = 0.6,
+
+    -- When a window has a known EnhancedDisplays layout, translate that
+    -- layout to the destination display when moving between displays.
+    moveLayoutMode = "mapped",
 
     shortcuts = {
         ["⌘1"] = {
@@ -338,6 +348,40 @@ Supported modifier names are:
 | — | `fn` |
 
 The parser is intentionally forgiving about spaces around `+`.
+
+
+---
+
+# Shortcut Popups
+
+EnhancedDisplays can optionally show a small on-screen message whenever one of its shortcuts is triggered.
+
+By default, shortcut popups are disabled:
+
+```lua
+showShortcutAlerts = false
+```
+
+To enable them:
+
+```lua
+showShortcutAlerts = true
+```
+
+Set how long the popup remains visible, in seconds:
+
+```lua
+shortcutAlertDuration = 0.6
+```
+
+For example, a very brief confirmation:
+
+```lua
+showShortcutAlerts = true
+shortcutAlertDuration = 0.25
+```
+
+These settings affect only EnhancedDisplays shortcut feedback. Error messages such as an unknown layout or disconnected target display are still shown when needed.
 
 ---
 
@@ -689,20 +733,74 @@ The list wraps around.
 
 The window first moves to `monitor`, then becomes the right third of that display.
 
-## Relative size versus absolute size
+## Layout behavior when moving between displays
 
-By default, Hammerspoon adjusts the moved window relative to the destination display.
+EnhancedDisplays supports three cross-display move modes.
 
-If you want to preserve its absolute size instead:
+### `mapped` — recommended
+
+```lua
+moveLayoutMode = "mapped"
+```
+
+This is the default.
+
+EnhancedDisplays remembers the most recent **layout shortcut** used on each window. When that window is moved to another display, EnhancedDisplays looks up what the same shortcut means on the destination display and applies that destination layout.
+
+For example:
+
+```lua
+["⌘1"] = {
+    laptop  = "leftHalf",
+    monitor = "leftThird",
+}
+
+["⌘⌥1"] = {
+    laptop  = "topLeft",
+    monitor = "ninth1",
+}
+
+["⌃1"] = "nextDisplay"
+```
+
+If a window is placed with `⌘1` on the laptop, it occupies the left half. Pressing the move-between-displays shortcut then moves it to the monitor and resizes it to the left third.
+
+Likewise, a window placed with `⌘⌥1` changes from the laptop's top-left quarter to the monitor's top-left ninth.
+
+If the destination display has **no mapping for the remembered shortcut**, EnhancedDisplays falls back to a normal relative move rather than guessing.
+
+### `relative`
+
+```lua
+moveLayoutMode = "relative"
+```
+
+The window keeps approximately the same relative position and relative size on the destination display. This is Hammerspoon's normal `moveToScreen()` behavior.
+
+### `absolute`
+
+```lua
+moveLayoutMode = "absolute"
+```
+
+The window keeps its absolute size while moving to the destination display.
+
+You can override the global mode for one move action:
 
 ```lua
 ["⌃1"] = {
     action = "nextDisplay",
-    preserveAbsoluteSize = true,
+    moveLayoutMode = "absolute",
 }
 ```
 
-The same option can be used with `previousDisplay` and `moveToDisplay`.
+The older per-action option remains supported:
+
+```lua
+preserveAbsoluteSize = true
+```
+
+and is equivalent to `moveLayoutMode = "absolute"` for that action.
 
 ---
 
@@ -730,6 +828,14 @@ EnhancedDisplays:start({
 
     gap = 0,
     animationDuration = 0,
+
+    -- Optional shortcut feedback.
+    showShortcutAlerts = false,
+    shortcutAlertDuration = 0.6,
+
+    -- Translate the last EnhancedDisplays layout when a window moves
+    -- between displays.
+    moveLayoutMode = "mapped",
 
     layouts = {
         -- 3×3 cells, numbered column-first:
@@ -821,6 +927,8 @@ EnhancedDisplays:start({
 ```
 
 The important point is not the particular shortcuts. The important point is that **one shortcut table describes both displays without duplicating the whole configuration**.
+
+With `moveLayoutMode = "mapped"`, the move-between-displays shortcut also remembers the last EnhancedDisplays placement shortcut used for a window. A laptop half can therefore become the corresponding monitor third, and a laptop quarter can become the corresponding monitor ninth automatically.
 
 ---
 
@@ -925,6 +1033,16 @@ Deletes all current EnhancedDisplays hotkeys without otherwise changing the conf
 ```lua
 EnhancedDisplays:unbindAll()
 ```
+
+## `shortcutStatus(shortcut)`
+
+Checks whether Hammerspoon reports a shortcut as assignable and whether macOS reports it as system-assigned:
+
+```lua
+spoon.EnhancedDisplays:shortcutStatus("⌃1")
+```
+
+This is particularly useful for `Control` + number shortcuts, which macOS may reserve for Mission Control / Spaces.
 
 ## `listDisplays(showAlert)`
 
@@ -1091,6 +1209,20 @@ Check the Hammerspoon Console for errors and verify that Hammerspoon has Accessi
 
 Also verify that another application is not already using the same global shortcut.
 
+You can ask EnhancedDisplays/Hammerspoon to inspect a shortcut:
+
+```lua
+spoon.EnhancedDisplays:shortcutStatus("⌃1")
+```
+
+If `assignable` is `false`, the shortcut is usually reserved by macOS. `Control` + number shortcuts are commonly used for Mission Control / switching Desktop Spaces. Open **System Settings → Keyboard → Keyboard Shortcuts → Mission Control** and disable or change the conflicting Desktop shortcut, then reload Hammerspoon.
+
+If `assignable` is `true` but the EnhancedDisplays shortcut still does nothing, another Hammerspoon hotkey may be shadowing it. Inspect active Hammerspoon hotkeys with:
+
+```lua
+hs.inspect(hs.hotkey.getHotkeys())
+```
+
 ## `no shortcut action for ...`
 
 You created a per-display shortcut but did not define an action for the current display.
@@ -1163,7 +1295,7 @@ hs.reload()
 
 ---
 
-# Current Scope of Version 0.1.0
+# Current Scope of Version 0.1.1
 
 The first release intentionally concentrates on physical-display geometry and easy shortcut assignment.
 
@@ -1210,7 +1342,6 @@ Possible future additions include:
 
 - window swapping;
 - per-application display/layout rules;
-- move-and-snap rules when a window changes display;
 - mouse/trackpad snapping;
 - mouse/trackpad moving and resizing;
 - layout cycling;
@@ -1285,4 +1416,4 @@ See [LICENSE](LICENSE).
 
 See [CHANGELOG.md](CHANGELOG.md).
 
-For version 0.1.0, the focus is the physical-display foundation: display-aware shortcuts, screen-relative layouts, grid-based layouts, display aliases, and moving windows between real monitors.
+For version 0.1.1, the focus remains the physical-display foundation: display-aware shortcuts, screen-relative layouts, grid-based layouts, display aliases, mapped cross-display moves, and configurable shortcut feedback.

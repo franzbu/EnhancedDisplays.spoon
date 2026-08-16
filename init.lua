@@ -2,7 +2,7 @@ local obj = {}
 obj.__index = obj
 
 obj.name = "EnhancedDisplays"
-obj.version = "0.1.0"
+obj.version = "0.1.1"
 obj.author = "Franz B."
 obj.homepage = "https://github.com/franzbu/EnhancedDisplays.spoon"
 obj.license = "MIT"
@@ -36,6 +36,8 @@ obj.defaultLayouts = {
 obj.config = { displays = {} }
 obj.layouts = nil
 obj.hotkeys = {}
+obj.bindings = {}
+obj.windowState = {}
 
 obj.actionNames = {
     nextDisplay = true,
@@ -253,7 +255,7 @@ function obj:_resolveLayout(layout)
     return self.layouts[layout]
 end
 
-function obj:applyLayout(layout, win)
+function obj:applyLayout(layout, win, screen)
     win = win or self:_focusedWindow()
     if not win then return false end
 
@@ -264,7 +266,7 @@ function obj:applyLayout(layout, win)
         return false
     end
 
-    local screen = win:screen()
+    screen = screen or win:screen()
     if not screen then return false end
 
     local frame = screen:fromUnitRect(rect)
@@ -309,6 +311,32 @@ function obj:_adjacentDisplay(win, delta)
     return screens[target]
 end
 
+function obj:_isLayoutAction(action)
+    if type(action) == "string" then return self.layouts[action] ~= nil end
+    if isRect(action) then return true end
+    return type(action) == "table" and action.layout ~= nil and action.action == nil
+end
+
+function obj:_rememberWindowShortcut(win, shortcut)
+    if not win or not shortcut then return end
+    local id = win:id()
+    if id then self.windowState[id] = { shortcut = shortcut } end
+end
+
+function obj:_mappedLayoutForScreen(win, screen)
+    if not win or not screen then return nil end
+    local id = win:id()
+    local state = id and self.windowState[id] or nil
+    if not state or not state.shortcut then return nil end
+
+    local binding = (self.bindings or {})[state.shortcut]
+    if binding == nil then return nil end
+
+    local target = self:_targetForScreen(binding, screen)
+    if self:_isLayoutAction(target) then return target end
+    return nil
+end
+
 function obj:moveToDisplay(target, options, win)
     win = win or self:_focusedWindow()
     if not win then return false end
@@ -322,11 +350,31 @@ function obj:moveToDisplay(target, options, win)
         return false
     end
 
-    -- Hammerspoon's moveToScreen retains relative position and size when noResize=false.
-    local preserveAbsoluteSize = options.preserveAbsoluteSize == true
+    local mode = options.moveLayoutMode or self.config.moveLayoutMode or "mapped"
+    if options.preserveAbsoluteSize == true then mode = "absolute" end
+
+    if mode ~= "mapped" and mode ~= "relative" and mode ~= "absolute" then
+        hs.alert.show("EnhancedDisplays: invalid moveLayoutMode " .. tostring(mode))
+        return false
+    end
+
+    local mappedLayout = nil
+    if not options.layout and mode == "mapped" then
+        mappedLayout = self:_mappedLayoutForScreen(win, screen)
+    end
+
+    -- Hammerspoon retains relative position and size by default; noResize=true
+    -- keeps the absolute window size instead. Mapped mode first moves relatively
+    -- and then applies the destination layout when one exists.
+    local preserveAbsoluteSize = (mode == "absolute")
     win:moveToScreen(screen, preserveAbsoluteSize, true, self.config.animationDuration or 0)
 
-    if options.layout then self:applyLayout(options.layout, win) end
+    if options.layout then
+        self:applyLayout(options.layout, win, screen)
+    elseif mappedLayout then
+        self:_runAction(mappedLayout, win, screen)
+    end
+
     return true
 end
 
@@ -352,13 +400,12 @@ function obj:moveToPreviousDisplay(options, win)
     return self:moveToDisplay(screen, options, win)
 end
 
-function obj:_targetForCurrentDisplay(binding, win)
+function obj:_targetForScreen(binding, screen)
     if type(binding) ~= "table" or isRect(binding) then return binding end
 
     -- Explicit action/layout descriptors are not per-display maps.
     if binding.action or binding.layout then return binding end
 
-    local screen = win and win:screen() or nil
     local alias = self:displayAliasForScreen(screen)
 
     if alias and binding[alias] ~= nil then return binding[alias] end
@@ -373,9 +420,13 @@ function obj:_targetForCurrentDisplay(binding, win)
     return binding.default
 end
 
-function obj:_runAction(action, win)
+function obj:_targetForCurrentDisplay(binding, win)
+    return self:_targetForScreen(binding, win and win:screen() or nil)
+end
+
+function obj:_runAction(action, win, screen)
     if type(action) == "string" then
-        if self.layouts[action] then return self:applyLayout(action, win) end
+        if self.layouts[action] then return self:applyLayout(action, win, screen) end
         if action == "nextDisplay" then return self:moveToNextDisplay({}, win) end
         if action == "previousDisplay" then return self:moveToPreviousDisplay({}, win) end
         if action == "listDisplays" then self:listDisplays(true); return true end
@@ -384,12 +435,12 @@ function obj:_runAction(action, win)
         return false
     end
 
-    if isRect(action) then return self:applyLayout(action, win) end
+    if isRect(action) then return self:applyLayout(action, win, screen) end
 
     if type(action) ~= "table" then return false end
 
     if action.layout and not action.action then
-        return self:applyLayout(action.layout, win)
+        return self:applyLayout(action.layout, win, screen)
     end
 
     if action.action == "nextDisplay" then
@@ -407,7 +458,34 @@ function obj:_runAction(action, win)
     return false
 end
 
-function obj:runBinding(binding)
+function obj:_showShortcutAlert(shortcut)
+    if self.config.showShortcutAlerts ~= true then return end
+
+    local duration = tonumber(self.config.shortcutAlertDuration)
+    if duration == nil then duration = 0.6 end
+    if duration <= 0 then return end
+
+    hs.alert.show("EnhancedDisplays: " .. shortcut, duration)
+end
+
+function obj:shortcutStatus(shortcut)
+    local mods, key = self:parseShortcut(shortcut)
+    local status = {
+        assignable = hs.hotkey.assignable(mods, key),
+        systemAssigned = hs.hotkey.systemAssigned(mods, key),
+    }
+
+    print(string.format(
+        "EnhancedDisplays shortcut %s — assignable: %s, systemAssigned: %s",
+        shortcut,
+        tostring(status.assignable),
+        hs.inspect(status.systemAssigned)
+    ))
+
+    return status
+end
+
+function obj:runBinding(binding, shortcut)
     -- listDisplays intentionally works without a focused window.
     if binding == "listDisplays"
         or (type(binding) == "table" and binding.action == "listDisplays") then
@@ -424,15 +502,28 @@ function obj:runBinding(binding)
         return false
     end
 
-    return self:_runAction(target, win)
+    local ok = self:_runAction(target, win)
+    if ok and shortcut and self:_isLayoutAction(target) then
+        self:_rememberWindowShortcut(win, shortcut)
+    end
+    return ok
 end
 
 function obj:bind(shortcut, binding)
     local mods, key = self:parseShortcut(shortcut)
-    local hotkey = hs.hotkey.bind(mods, key, "EnhancedDisplays: " .. shortcut, function()
-        self:runBinding(binding)
+    local hotkey = hs.hotkey.bind(mods, key, function()
+        self:_showShortcutAlert(shortcut)
+        self:runBinding(binding, shortcut)
     end)
+
+    if not hotkey then
+        self.log.ef("Could not bind shortcut %s", shortcut)
+        hs.alert.show("EnhancedDisplays: could not bind " .. shortcut)
+        return nil
+    end
+
     table.insert(self.hotkeys, hotkey)
+    self.bindings[shortcut] = binding
     return hotkey
 end
 
@@ -441,6 +532,7 @@ function obj:unbindAll()
         pcall(function() hotkey:delete() end)
     end
     self.hotkeys = {}
+    self.bindings = {}
 end
 
 function obj:start(config)
@@ -448,9 +540,23 @@ function obj:start(config)
 
     self.config = config or {}
     self.layouts = mergeTables(self.defaultLayouts, self.config.layouts or {})
+    self.windowState = {}
 
     if self.config.animationDuration ~= nil then
         assert(type(self.config.animationDuration) == "number", "animationDuration must be a number")
+    end
+    if self.config.showShortcutAlerts ~= nil then
+        assert(type(self.config.showShortcutAlerts) == "boolean", "showShortcutAlerts must be true or false")
+    end
+    if self.config.shortcutAlertDuration ~= nil then
+        assert(type(self.config.shortcutAlertDuration) == "number" and self.config.shortcutAlertDuration >= 0,
+            "shortcutAlertDuration must be a non-negative number")
+    end
+    if self.config.moveLayoutMode ~= nil then
+        assert(self.config.moveLayoutMode == "mapped"
+            or self.config.moveLayoutMode == "relative"
+            or self.config.moveLayoutMode == "absolute",
+            "moveLayoutMode must be mapped, relative, or absolute")
     end
 
     for shortcut, binding in pairs(self.config.shortcuts or {}) do

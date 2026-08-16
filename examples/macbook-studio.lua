@@ -21,6 +21,9 @@ EnhancedDisplays:start({
 
     gap = 0,
     animationDuration = 0,
+    showShortcutAlerts = false,
+    shortcutAlertDuration = 0.6,
+    moveLayoutMode = "mapped",
 
     layouts = {
         -- 3x3 cells, numbered column-first:
